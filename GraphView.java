@@ -1,13 +1,5 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
 package javaassignment;
 
-/**
- *
- * @author event
- */
 import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
@@ -15,142 +7,141 @@ import javafx.scene.shape.Line;
 import javafx.scene.text.Text;
 
 public class GraphView<V extends Displayable> extends Pane {
-	private static final double NODE_RADIUS = 26.0;
-	private static final double ARROW_LENGTH = 12.0;
 
-	public GraphView(AbstractGraph<V> graph) {
-		// White background so black text/arrows are readable
-		setStyle("-fx-background-color: white;");
+    // Look-and-feel settings
+    private static final double CITY_CIRCLE_RADIUS = 26.0;   // size of each city circle
+    private static final double ARROW_SIDE_LENGTH  = 12.0;   // length of each arrowhead side
+    private static final double LABEL_DISTANCE_FROM_LINE = 8.0; // how far the label sits off the line
+    private static final double CITY_NAME_OFFSET_Y = 8.0;    // how far above the circle the city name is drawn
 
-		// Draw edges first (so nodes sit on top)
-		java.util.Set<String> labeledPairs = new java.util.HashSet<>();
-		for (int u = 0; u < graph.getSize(); u++) {
-			for (Edge e : graph.getNeighbors(u)) {
-				V src = graph.getVertex(u);
-				V dst = graph.getVertex(e.v);
+    public GraphView(AbstractGraph<V> graph) {
+        // White background for good contrast
+        setStyle("-fx-background-color: white;");
 
-				// Draw the directed edge line + arrow
-				drawDirectedEdge(src, dst);
+        // 1) Draw all edges first (lines, arrowheads, and hour labels)
+        for (int sourceIndex = 0; sourceIndex < graph.getSize(); sourceIndex++) {
+            V sourceCity = graph.getVertex(sourceIndex);
 
-				// Build undirected pair key
-				String key = (u < e.v) ? (u + "-" + e.v) : (e.v + "-" + u);
-				if (!labeledPairs.contains(key)) {
-					// Find reverse weight if exists
-					Double reverseWeight = null;
-					for (Edge re : graph.getNeighbors(e.v)) {
-						if (re.v == u) { reverseWeight = re.weight; break; }
-					}
+            for (Edge edge : graph.getNeighbors(sourceIndex)) {
+                V destinationCity = graph.getVertex(edge.v);
 
-					String labelText;
-					if (reverseWeight != null) {
-						if (Math.abs(e.weight - reverseWeight) < 1e-9) {
-							labelText = trimHours(e.weight) + "h";
-						} else {
-							labelText = trimHours(e.weight) + "h/" + trimHours(reverseWeight) + "h";
-						}
-					} else {
-						labelText = trimHours(e.weight) + "h";
-					}
+                // --- A. Read the center coordinates of the two cities ---
+                double sourceCenterX = sourceCity.getX();
+                double sourceCenterY = sourceCity.getY();
+                double destinationCenterX = destinationCity.getX();
+                double destinationCenterY = destinationCity.getY();
 
-					drawEdgeLabel(src, dst, labelText);
-					labeledPairs.add(key);
-				}
-			}
-		}
+                // --- B. Compute the direction from source to destination ---
+                double deltaX = destinationCenterX - sourceCenterX;
+                double deltaY = destinationCenterY - sourceCenterY;
 
-		// Draw nodes and labels last
-		for (int i = 0; i < graph.getSize(); i++) {
-			V city = graph.getVertex(i);
-			Circle circle = new Circle(city.getX(), city.getY(), NODE_RADIUS);
-			circle.setFill(Color.BLACK);
-			circle.setStroke(Color.BLACK);
+                // Length of the line between the two city centers
+                double centerToCenterLength = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                if (centerToCenterLength == 0.0) {
+                    // Two cities at the exact same point: skip this edge to avoid divide-by-zero.
+                    continue;
+                }
 
-			// City name above node, centered approximately
-			Text name = new Text(city.getX() - city.getName().length() * 3.5, city.getY() - NODE_RADIUS - 8, city.getName());
-			name.setFill(Color.BLACK);
+                // Unit (length = 1) direction from source to destination
+                double directionX = deltaX / centerToCenterLength;
+                double directionY = deltaY / centerToCenterLength;
 
-			getChildren().addAll(circle, name);
-		}
-	}
+                // --- C. Shorten the line so it touches the circle borders, not the centers ---
+                // Move the start forward by the city radius; move the end backward by the city radius.
+                double lineStartX = sourceCenterX + directionX * CITY_CIRCLE_RADIUS;
+                double lineStartY = sourceCenterY + directionY * CITY_CIRCLE_RADIUS;
+                double lineEndX   = destinationCenterX - directionX * CITY_CIRCLE_RADIUS;
+                double lineEndY   = destinationCenterY - directionY * CITY_CIRCLE_RADIUS;
 
-	private void drawDirectedEdge(V src, V dst) {
-		double sx = src.getX();
-		double sy = src.getY();
-		double ex = dst.getX();
-		double ey = dst.getY();
+                // --- D. Draw the main straight line (flight path) ---
+                Line flightLine = new Line(lineStartX, lineStartY, lineEndX, lineEndY);
+                flightLine.setStroke(Color.BLACK);
+                getChildren().add(flightLine);
 
-		// Direction vector
-		double dx = ex - sx;
-		double dy = ey - sy;
-		double len = Math.hypot(dx, dy);
-		if (len == 0) return; // avoid degenerate
-		double nx = dx / len;
-		double ny = dy / len;
+                // --- E. Draw the arrowhead at the end of the line ---
+                // Angle of the line (in radians)
+                double lineAngle = Math.atan2(directionY, directionX);
 
-		// Trim so the line touches node borders, not centers
-		double startX = sx + nx * NODE_RADIUS;
-		double startY = sy + ny * NODE_RADIUS;
-		double endX = ex - nx * NODE_RADIUS;
-		double endY = ey - ny * NODE_RADIUS;
+                // Two side angles for the arrowhead (±25 degrees from the line direction)
+                double leftSideAngle  = lineAngle + Math.toRadians(25.0);
+                double rightSideAngle = lineAngle - Math.toRadians(25.0);
 
-		// Main straight line
-		Line edgeLine = new Line(startX, startY, endX, endY);
-		edgeLine.setStroke(Color.BLACK);
-		getChildren().add(edgeLine);
+                // Endpoints of the two arrowhead sides
+                double arrowLeftEndX  = lineEndX - ARROW_SIDE_LENGTH * Math.cos(leftSideAngle);
+                double arrowLeftEndY  = lineEndY - ARROW_SIDE_LENGTH * Math.sin(leftSideAngle);
+                double arrowRightEndX = lineEndX - ARROW_SIDE_LENGTH * Math.cos(rightSideAngle);
+                double arrowRightEndY = lineEndY - ARROW_SIDE_LENGTH * Math.sin(rightSideAngle);
 
-		// Arrowhead at end of straight line
-		double tx = nx; // unit tangent along the line
-		double ty = ny;
+                Line arrowLeftSide  = new Line(lineEndX, lineEndY, arrowLeftEndX,  arrowLeftEndY);
+                Line arrowRightSide = new Line(lineEndX, lineEndY, arrowRightEndX, arrowRightEndY);
+                arrowLeftSide.setStroke(Color.BLACK);
+                arrowRightSide.setStroke(Color.BLACK);
+                getChildren().addAll(arrowLeftSide, arrowRightSide);
 
-		double ax1x = endX - ARROW_LENGTH * (tx * Math.cos(Math.toRadians(25)) - ty * Math.sin(Math.toRadians(25)));
-		double ax1y = endY - ARROW_LENGTH * (tx * Math.sin(Math.toRadians(25)) + ty * Math.cos(Math.toRadians(25)));
-		double ax2x = endX - ARROW_LENGTH * (tx * Math.cos(Math.toRadians(-25)) - ty * Math.sin(Math.toRadians(-25)));
-		double ax2y = endY - ARROW_LENGTH * (tx * Math.sin(Math.toRadians(-25)) + ty * Math.cos(Math.toRadians(-25)));
+                // --- F. Draw the weight (hours) near the middle of the line ---
+                // Midpoint of the shortened line
+                double midpointX = (lineStartX + lineEndX) / 2.0;
+                double midpointY = (lineStartY + lineEndY) / 2.0;
 
-		Line arrow1 = new Line(endX, endY, ax1x, ax1y);
-		Line arrow2 = new Line(endX, endY, ax2x, ax2y);
-		arrow1.setStroke(Color.BLACK);
-		arrow2.setStroke(Color.BLACK);
-		getChildren().addAll(arrow1, arrow2);
+                // A perpendicular direction to the line (rotate by +90°): (-directionY, directionX)
+                double perpendicularX = -directionY;
+                double perpendicularY =  directionX;
 
-	}
+                // Decide which side to nudge the label so multiple labels don't stack perfectly
+                double labelSideFactor;
+                if (lineStartX <= lineEndX) {
+                    labelSideFactor = 1.0;   // place label on one side
+                } else {
+                    labelSideFactor = -1.0;  // place label on the other side
+                }
 
-	private void drawEdgeLabel(V src, V dst, String text) {
-		double sx = src.getX();
-		double sy = src.getY();
-		double ex = dst.getX();
-		double ey = dst.getY();
+                // Final label position
+                double labelX = midpointX + labelSideFactor * LABEL_DISTANCE_FROM_LINE * perpendicularX;
+                double labelY = midpointY + labelSideFactor * LABEL_DISTANCE_FROM_LINE * perpendicularY;
 
-		double dx = ex - sx;
-		double dy = ey - sy;
-		double len = Math.hypot(dx, dy);
-		if (len == 0) return;
-		double nx = dx / len;
-		double ny = dy / len;
+                Text hoursLabel = new Text(labelX, labelY, formatHours(edge.weight));
+                hoursLabel.setFill(Color.BLACK);
+                hoursLabel.setStyle("-fx-font-size: 12;");
+                getChildren().add(hoursLabel);
+            }
+        }
 
-		// Trim to node borders
-		double startX = sx + nx * NODE_RADIUS;
-		double startY = sy + ny * NODE_RADIUS;
-		double endX = ex - nx * NODE_RADIUS;
-		double endY = ey - ny * NODE_RADIUS;
+        // 2) Draw all nodes (circles) and city names last so they appear on top of the lines
+        for (int i = 0; i < graph.getSize(); i++) {
+            V city = graph.getVertex(i);
 
-		// Midpoint with small perpendicular nudge for readability
-		double mx = (startX + endX) / 2.0;
-		double my = (startY + endY) / 2.0;
-		double px = -ny;
-		double py = nx;
-		Text weightText = new Text(mx + 8 * px, my + 8 * py, text);
-		weightText.setFill(Color.BLACK);
-		getChildren().add(weightText);
-	}
+            // City circle
+            Circle cityCircle = new Circle(city.getX(), city.getY(), CITY_CIRCLE_RADIUS);
+            cityCircle.setFill(Color.BLACK);
+            cityCircle.setStroke(Color.BLACK);
+            getChildren().add(cityCircle);
 
-	private String trimHours(double h) {
-		// Render integer hours without .0
-		if (Math.abs(h - Math.rint(h)) < 1e-9) {
-			return Integer.toString((int)Math.rint(h));
-		}
-		return Double.toString(h);
-	}
+            // City name (drawn above the circle; roughly centered by subtracting half the text width estimate)
+            String cityName = city.getName();
+            double estimatedHalfTextWidth = cityName.length() * 3.5; // simple estimate for centering
+            double cityNameX = city.getX() - estimatedHalfTextWidth;
+            double cityNameY = city.getY() - CITY_CIRCLE_RADIUS - CITY_NAME_OFFSET_Y;
+
+            Text cityNameText = new Text(cityNameX, cityNameY, cityName);
+            cityNameText.setFill(Color.BLACK);
+            cityNameText.setStyle("-fx-font-size: 13; -fx-font-weight: bold;");
+            getChildren().add(cityNameText);
+        }
+    }
+
+    /**
+     * Convert a number of hours into a label like "1h" or "2.5h".
+     * Whole numbers are shown without ".0".
+     */
+    private String formatHours(double hours) {
+        double nearestInteger = Math.rint(hours);
+        double difference = Math.abs(hours - nearestInteger);
+
+        if (difference < 1e-9) {
+            int wholeHours = (int) nearestInteger;
+            return wholeHours + "h";
+        } else {
+            return hours + "h";
+        }
+    }
 }
-
-
